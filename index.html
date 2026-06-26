@@ -134,24 +134,55 @@ document.getElementById('ausschussBtn').addEventListener('click',()=>{
   if(confirm('Hülse '+codeEl.value.trim()+' wirklich als Ausschuss buchen?')) sendScan(true);
 });
 
+// JSONP-Aufruf: umgeht CORS, indem die Anfrage als <script>-Tag geladen wird.
+// Apps Script antwortet mit callback({...}), das wir hier auffangen.
+let _jsonpCounter = 0;
+function jsonp(params, timeoutMs){
+  return new Promise((resolve, reject)=>{
+    const cbName = '_thorcb_' + (++_jsonpCounter) + '_' + Date.now();
+    const script = document.createElement('script');
+    let done = false;
+    const cleanup = ()=>{
+      delete window[cbName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    };
+    const timer = setTimeout(()=>{
+      if(done) return; done = true; cleanup();
+      reject(new Error('Zeitüberschreitung – keine Antwort vom Server.'));
+    }, timeoutMs || 12000);
+    window[cbName] = (data)=>{
+      if(done) return; done = true;
+      clearTimeout(timer); cleanup(); resolve(data);
+    };
+    const usp = new URLSearchParams(params);
+    usp.set('callback', cbName);
+    script.onerror = ()=>{
+      if(done) return; done = true;
+      clearTimeout(timer); cleanup();
+      reject(new Error('Netzwerkfehler beim Laden.'));
+    };
+    script.src = API_URL + '?' + usp.toString();
+    document.body.appendChild(script);
+  });
+}
+
 async function sendScan(istAusschuss){
   const code = codeEl.value.trim();
   if(!code){ return; }
-  const params = new URLSearchParams({
+  const params = {
     token: TOKEN, action:'scan', code, station,
     ausschuss: istAusschuss?'1':'0'
-  });
+  };
   if(station==='wiegen'){
     const g = document.getElementById('gewicht').value.trim();
-    if(g) params.set('gewicht', g);
+    if(g) params.gewicht = g;
   }
   showResult('warn','Sende…');
   try{
-    const r = await fetch(API_URL+'?'+params.toString(), { method:'GET' });
-    const data = await r.json();
+    const data = await jsonp(params);
     handleResponse(data, code);
   }catch(err){
-    showResult('err','Netzwerkfehler: '+err+'  — Scan NICHT gespeichert.');
+    showResult('err','Netzwerkfehler: '+err.message+'  — Scan NICHT gespeichert.');
   }
 }
 
@@ -204,8 +235,7 @@ function addRecent(code,data){
 async function refreshBlockInfo(){
   if(station!=='einbau'){ blockEl.textContent=''; return; }
   try{
-    const r=await fetch(API_URL+'?'+new URLSearchParams({token:TOKEN,action:'blockInfo'}));
-    const d=await r.json();
+    const d = await jsonp({token:TOKEN, action:'blockInfo'});
     if(d.ok){
       blockEl.textContent = 'Block '+d.block+' · nächste: '+(d.naechsteSerie||'—')
         +' · verbleibend: '+d.verbleibend;
