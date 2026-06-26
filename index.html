@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>T.H.O.R. Hülsen-Scan</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#1a1e26; --line:#2a3038; --txt:#e8ecf1;
+    --muted:#8b95a3; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);-webkit-text-size-adjust:100%}
+  header{padding:14px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;
+         background:var(--bg);z-index:5}
+  h1{font-size:16px;margin:0 0 10px}
+  .stations{display:flex;gap:6px}
+  .stations button{flex:1;padding:12px 4px;border:1px solid var(--line);background:var(--card);
+       color:var(--muted);border-radius:10px;font-size:14px;font-weight:600;cursor:pointer}
+  .stations button.active{color:#fff;border-color:var(--accent);background:#1e293b}
+  .stations button[data-s="extrudieren"].active{border-color:var(--accent)}
+  .stations button[data-s="wiegen"].active{border-color:var(--accent)}
+  .stations button[data-s="einbau"].active{border-color:var(--accent)}
+  main{padding:16px;max-width:560px;margin:0 auto}
+  .scanbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text],input[type=number]{width:100%;padding:14px;font-size:18px;border-radius:10px;
+       border:1px solid var(--line);background:#0c0e12;color:var(--txt);outline:none}
+  input:focus{border-color:var(--accent)}
+  .row{display:flex;gap:10px;align-items:flex-end;margin-top:12px}
+  .row>div{flex:1}
+  .btn{padding:14px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;width:100%}
+  .btn-ausschuss{background:#3a2226;color:#ffb4b4;border:1px solid #5a2a30;margin-top:10px}
+  .result{border-radius:14px;padding:16px;margin-bottom:14px;font-size:15px;line-height:1.5;display:none}
+  .result.show{display:block}
+  .result.ok{background:#0f2417;border:1px solid #1f5132}
+  .result.warn{background:#2a210d;border:1px solid #5a4410}
+  .result.err{background:#2a1416;border:1px solid #5a2025}
+  .result .big{font-size:24px;font-weight:800;margin:4px 0}
+  .result .serie{font-size:28px;font-weight:800;color:var(--ok);letter-spacing:.02em}
+  .blockinfo{font-size:13px;color:var(--muted);text-align:center;margin-top:4px}
+  .log{margin-top:8px}
+  .log h2{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 8px}
+  .logrow{display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);
+       border-radius:8px;margin-bottom:6px;font-size:13px;background:var(--card)}
+  .logrow .code{font-weight:700}
+  .logrow .st{color:var(--muted)}
+  .muted{color:var(--muted)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:700}
+  .pill.extrudiert{background:#13294a;color:#93c5fd}
+  .pill.gewogen{background:#13294a;color:#93c5fd}
+  .pill.eingebaut{background:#0f2417;color:#86efac}
+  .pill.verworfen{background:#2a1416;color:#fca5a5}
+</style>
+</head>
+<body>
+<header>
+  <h1>T.H.O.R. Hülsen-Scan</h1>
+  <div class="stations">
+    <button data-s="extrudieren" class="active">1 · Extrudieren</button>
+    <button data-s="wiegen">2 · Wiegen</button>
+    <button data-s="einbau">3 · Einbau</button>
+  </div>
+</header>
+
+<main>
+  <div class="scanbox">
+    <label id="scanlabel">Hülse scannen – Station: Extrudieren</label>
+    <input id="code" type="text" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" inputmode="text"
+           placeholder="Barcode scannen oder tippen…">
+
+    <div id="wiegen-extra" style="display:none" class="row">
+      <div>
+        <label>Gewicht (g)</label>
+        <input id="gewicht" type="number" step="0.1" inputmode="decimal" placeholder="z.B. 70.0">
+      </div>
+    </div>
+
+    <button class="btn btn-ausschuss" id="ausschussBtn">⚠ Diese Hülse als Ausschuss buchen</button>
+  </div>
+
+  <div id="result" class="result"></div>
+  <div id="blockinfo" class="blockinfo"></div>
+
+  <div class="log">
+    <h2>Letzte Scans (dieses Gerät)</h2>
+    <div id="loglist"></div>
+  </div>
+</main>
+
+<script>
+// ====== KONFIGURATION ======
+// Web-App-URL aus Apps Script (endet auf /exec)
+const API_URL = 'https://script.google.com/macros/s/AKfycbwBTcuL0QwsH9mzxiLz1zc7Ghej4kiAK1g84hUW_WtFPJRRJxl9_Ctd3TMuSMhGL2Ju/exec';
+// Muss mit dem Token im Apps Script übereinstimmen
+const TOKEN   = 'HB-YOR';
+// ===========================
+
+let station = 'extrudieren';
+const labels = { extrudieren:'Extrudieren', wiegen:'Wiegen', einbau:'Einbau' };
+const codeEl = document.getElementById('code');
+const resEl  = document.getElementById('result');
+const blockEl= document.getElementById('blockinfo');
+const logList= document.getElementById('loglist');
+const recent = [];
+
+// Station wechseln
+document.querySelectorAll('.stations button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.stations button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    station = b.dataset.s;
+    document.getElementById('scanlabel').textContent = 'Hülse scannen – Station: '+labels[station];
+    document.getElementById('wiegen-extra').style.display = (station==='wiegen')?'flex':'none';
+    refreshBlockInfo();
+    focusCode();
+  });
+});
+
+function focusCode(){ codeEl.focus(); codeEl.select(); }
+
+// Enter im Code-Feld = Scan absenden (HID-Scanner schickt Enter automatisch)
+codeEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){ e.preventDefault(); sendScan(false); }
+});
+// Bei Wiegen: Enter im Gewichtsfeld löst ebenfalls aus
+document.getElementById('gewicht').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){ e.preventDefault(); sendScan(false); }
+});
+document.getElementById('ausschussBtn').addEventListener('click',()=>{
+  if(!codeEl.value.trim()){ showResult('err','Erst Hülse scannen, dann Ausschuss buchen.'); return; }
+  if(confirm('Hülse '+codeEl.value.trim()+' wirklich als Ausschuss buchen?')) sendScan(true);
+});
+
+async function sendScan(istAusschuss){
+  const code = codeEl.value.trim();
+  if(!code){ return; }
+  const params = new URLSearchParams({
+    token: TOKEN, action:'scan', code, station,
+    ausschuss: istAusschuss?'1':'0'
+  });
+  if(station==='wiegen'){
+    const g = document.getElementById('gewicht').value.trim();
+    if(g) params.set('gewicht', g);
+  }
+  showResult('warn','Sende…');
+  try{
+    const r = await fetch(API_URL+'?'+params.toString(), { method:'GET' });
+    const data = await r.json();
+    handleResponse(data, code);
+  }catch(err){
+    showResult('err','Netzwerkfehler: '+err+'  — Scan NICHT gespeichert.');
+  }
+}
+
+function handleResponse(data, code){
+  if(!data.ok){
+    showResult('err','✗ '+(data.error||'Fehler'));
+    return;
+  }
+  let html='';
+  if(data.status==='verworfen'){
+    html = '<div>Hülse <b>'+code+'</b></div><div class="big" style="color:var(--warn)">⚠ Ausschuss verbucht</div>';
+    showResult('warn', html + warnLine(data));
+  } else if(station==='einbau' && data.serienNr){
+    html = '<div>Hülse <b>'+code+'</b> → Seriennummer</div>'
+         + '<div class="serie">'+data.serienNr+'</div>';
+    showResult('ok', html + warnLine(data));
+  } else {
+    html = '<div>Hülse <b>'+code+'</b></div>'
+         + '<div class="big">✓ '+capitalize(data.status)+'</div>'
+         + (data.gewicht?('<div class="muted">Gewicht: '+data.gewicht+' g</div>'):'');
+    showResult('ok', html + warnLine(data));
+  }
+  addRecent(code, data);
+  // Felder leeren, bereit für nächsten Scan
+  codeEl.value=''; 
+  const g=document.getElementById('gewicht'); if(g) g.value='';
+  refreshBlockInfo();
+  focusCode();
+}
+
+function warnLine(d){
+  return d.hinweis ? '<div class="muted" style="margin-top:8px">⚠ '+d.hinweis+'</div>' : '';
+}
+
+function showResult(kind,html){
+  resEl.className='result show '+kind;
+  resEl.innerHTML=html;
+}
+
+function addRecent(code,data){
+  recent.unshift({code, status:data.status, serie:data.serienNr||'', t:new Date()});
+  if(recent.length>15) recent.pop();
+  logList.innerHTML = recent.map(x=>
+    '<div class="logrow"><span class="code">'+x.code+'</span>'
+    +'<span class="st">'+(x.serie?('→ '+x.serie+'  '):'')
+    +'<span class="pill '+x.status+'">'+x.status+'</span></span></div>'
+  ).join('');
+}
+
+async function refreshBlockInfo(){
+  if(station!=='einbau'){ blockEl.textContent=''; return; }
+  try{
+    const r=await fetch(API_URL+'?'+new URLSearchParams({token:TOKEN,action:'blockInfo'}));
+    const d=await r.json();
+    if(d.ok){
+      blockEl.textContent = 'Block '+d.block+' · nächste: '+(d.naechsteSerie||'—')
+        +' · verbleibend: '+d.verbleibend;
+    } else {
+      blockEl.textContent = d.error||'';
+    }
+  }catch(e){ blockEl.textContent=''; }
+}
+
+function capitalize(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
+// Fokus halten: wenn man irgendwo hin tippt, zurück ins Scanfeld
+document.addEventListener('click',e=>{
+  if(e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON') focusCode();
+});
+window.addEventListener('load',()=>{ refreshBlockInfo(); focusCode(); });
+</script>
+</body>
+</html>
