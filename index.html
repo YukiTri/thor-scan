@@ -149,7 +149,7 @@ function jsonp(params, timeoutMs){
     const timer = setTimeout(()=>{
       if(done) return; done = true; cleanup();
       reject(new Error('Zeitüberschreitung – keine Antwort vom Server.'));
-    }, timeoutMs || 12000);
+    }, timeoutMs || 20000);
     window[cbName] = (data)=>{
       if(done) return; done = true;
       clearTimeout(timer); cleanup(); resolve(data);
