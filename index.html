@@ -52,6 +52,14 @@
   .pill.gewogen{background:#13294a;color:#93c5fd}
   .pill.eingebaut{background:#0f2417;color:#86efac}
   .pill.verworfen{background:#2a1416;color:#fca5a5}
+  .pill.rueckstellmuster{background:#2a2440;color:#c4b5fd}
+  .typbtns{display:flex;gap:8px}
+  .typbtns button{flex:1;padding:14px 4px;border:2px solid var(--line);background:#0c0e12;
+       color:var(--muted);border-radius:10px;font-size:16px;font-weight:700;cursor:pointer}
+  .typbtns button.active{border-color:var(--accent);background:#16263f;color:#fff}
+  .typbadge{display:inline-block;padding:3px 12px;border-radius:99px;font-size:14px;font-weight:800;
+       background:#16263f;color:#93c5fd;border:1px solid var(--accent)}
+  .typmissing{color:var(--err);font-weight:700}
 </style>
 </head>
 <body>
@@ -66,6 +74,28 @@
 
 <main>
   <div class="scanbox">
+    <div id="typrow" style="display:none;margin-bottom:14px">
+      <label id="typlabel">Typ wählen (gilt für alle folgenden Scans)</label>
+      <div class="typbtns">
+        <button type="button" data-typ="1">Typ 1</button>
+        <button type="button" data-typ="2">Typ 2</button>
+        <button type="button" data-typ="3">Typ 3</button>
+      </div>
+    </div>
+
+    <div id="einbau-start" style="display:none;margin-bottom:14px">
+      <label>Erste Seriennummer dieser Charge</label>
+      <div class="row" style="margin-top:0">
+        <div style="flex:2">
+          <input id="startserie" type="text" autocomplete="off" placeholder="z.B. L.1.26.0161">
+        </div>
+        <div style="flex:1">
+          <button type="button" class="btn" id="startBtn" style="background:#1e293b;color:#fff;border:1px solid var(--accent)">Setzen</button>
+        </div>
+      </div>
+      <div id="startstatus" class="muted" style="margin-top:6px"></div>
+    </div>
+
     <label id="scanlabel">Hülse scannen – Station: Extrudieren</label>
     <input id="code" type="text" autocomplete="off" autocapitalize="off"
            autocorrect="off" spellcheck="false" inputmode="text"
@@ -79,6 +109,10 @@
     </div>
 
     <button class="btn btn-ausschuss" id="ausschussBtn">⚠ Diese Hülse als Ausschuss buchen</button>
+
+    <button class="btn" id="rsmBtn" style="display:none;background:#2a2440;color:#c4b5fd;border:1px solid #4c3f7a;margin-top:10px">⊘ Diese Hülse als Rückstellmuster/Test</button>
+
+    <button class="btn" id="klebefehlerBtn" style="display:none;background:#3a2e22;color:#fbbf24;border:1px solid #5a4a2a;margin-top:10px">↩ Klebefehler – Rakete auflösen & nachrücken</button>
   </div>
 
   <div id="result" class="result"></div>
@@ -106,6 +140,75 @@ const blockEl= document.getElementById('blockinfo');
 const logList= document.getElementById('loglist');
 const recent = [];
 
+// Aktiver Typ (Sitzungs-Zustand). Bleibt gesetzt, bis bewusst geändert.
+// Wird im Browser gemerkt, damit er einen Reload übersteht.
+let aktiverTyp = '';
+try { aktiverTyp = localStorage.getItem('thor_typ') || ''; } catch(e){}
+
+// Startnummer der Einbau-Charge (gemerkt wie der Typ)
+let startSerie = '';
+try { startSerie = localStorage.getItem('thor_startserie') || ''; } catch(e){}
+
+const typrow = document.getElementById('typrow');
+const typBtns = document.querySelectorAll('.typbtns button');
+
+function setTyp(t){
+  aktiverTyp = t;
+  try { localStorage.setItem('thor_typ', t); } catch(e){}
+  typBtns.forEach(b=> b.classList.toggle('active', b.dataset.typ===t));
+  updateScanLabel();
+}
+typBtns.forEach(b=>{
+  b.addEventListener('click', ()=>{ setTyp(b.dataset.typ); focusCode(); });
+});
+// gemerkten Typ beim Laden anzeigen
+typBtns.forEach(b=> b.classList.toggle('active', b.dataset.typ===aktiverTyp));
+
+function updateScanLabel(){
+  const base = 'Hülse scannen – Station: '+labels[station];
+  const lbl = document.getElementById('scanlabel');
+  if(station==='extrudieren'){
+    lbl.innerHTML = aktiverTyp
+      ? base + ' · <span class="typbadge">Typ '+aktiverTyp+'</span>'
+      : base + ' · <span class="typmissing">⚠ Typ wählen!</span>';
+  } else {
+    lbl.textContent = base;
+  }
+}
+
+// Typ-Leiste pro Station ein-/ausblenden
+function updateTypRow(){
+  if(station==='extrudieren'){
+    typrow.style.display='block';
+    document.getElementById('typlabel').textContent = 'Typ wählen (gilt für alle folgenden Scans)';
+    typBtns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; });
+  } else {
+    typrow.style.display='none';
+  }
+  // Einbau-Elemente nur bei Einbau zeigen
+  const istEinbau = (station==='einbau');
+  document.getElementById('einbau-start').style.display = istEinbau ? 'block' : 'none';
+  document.getElementById('rsmBtn').style.display = istEinbau ? 'block' : 'none';
+  document.getElementById('klebefehlerBtn').style.display = istEinbau ? 'block' : 'none';
+  // Ausschuss-Button-Text leicht anpassen je Station (optional)
+  if(istEinbau){
+    // gemerkte Startnummer ins Feld
+    const sf = document.getElementById('startserie');
+    if(sf && startSerie) sf.value = startSerie;
+    updateStartStatus();
+  }
+}
+
+function updateStartStatus(){
+  const el = document.getElementById('startstatus');
+  if(!el) return;
+  if(startSerie){
+    el.innerHTML = 'Aktive Startnummer: <span class="typbadge">'+startSerie+'</span>';
+  } else {
+    el.innerHTML = '<span class="typmissing">⚠ Noch keine Startnummer gesetzt</span>';
+  }
+}
+
 // Station wechseln
 document.querySelectorAll('.stations button').forEach(b=>{
   b.addEventListener('click',()=>{
@@ -114,6 +217,8 @@ document.querySelectorAll('.stations button').forEach(b=>{
     station = b.dataset.s;
     document.getElementById('scanlabel').textContent = 'Hülse scannen – Station: '+labels[station];
     document.getElementById('wiegen-extra').style.display = (station==='wiegen')?'flex':'none';
+    updateTypRow();
+    updateScanLabel();
     refreshBlockInfo();
     focusCode();
   });
@@ -132,6 +237,67 @@ document.getElementById('gewicht').addEventListener('keydown',e=>{
 document.getElementById('ausschussBtn').addEventListener('click',()=>{
   if(!codeEl.value.trim()){ showResult('err','Erst Hülse scannen, dann Ausschuss buchen.'); return; }
   if(confirm('Hülse '+codeEl.value.trim()+' wirklich als Ausschuss buchen?')) sendScan(true);
+});
+
+// Startnummer setzen (mit Kollisionsprüfung)
+document.getElementById('startBtn').addEventListener('click', async ()=>{
+  const val = document.getElementById('startserie').value.trim();
+  if(!val){ showResult('err','Bitte eine Startnummer eingeben (z.B. L.1.26.0161).'); return; }
+  showResult('warn','Prüfe Startnummer…');
+  try{
+    const d = await jsonp({token:TOKEN, action:'startInfo', startserie:val});
+    if(!d.ok){ showResult('err','✗ '+(d.error||'Fehler')); return; }
+    if(d.kollision){
+      const ok = confirm('ACHTUNG: Für '+d.prefix+' sind bereits Nummern vergeben '
+        +'(höchste: '+d.hoechsteVergeben+').\n\n'
+        +'Wenn du bei '+d.startnummer+' startest, könnte es zu Doppelvergaben kommen.\n'
+        +'Die nächste FREIE Nummer wäre '+d.naechsteFrei+'.\n\n'
+        +'Trotzdem mit '+d.startnummer+' als Startnummer fortfahren?');
+      if(!ok){ showResult('warn','Startnummer nicht gesetzt.'); return; }
+    }
+    startSerie = val;
+    try { localStorage.setItem('thor_startserie', val); } catch(e){}
+    updateStartStatus();
+    showResult('ok','✓ Startnummer gesetzt: '+d.startnummer+' · nächste freie: '+d.naechsteFrei);
+    focusCode();
+  }catch(err){
+    showResult('err','Netzwerkfehler: '+err.message);
+  }
+});
+
+// Rückstellmuster/Test
+document.getElementById('rsmBtn').addEventListener('click',()=>{
+  if(!codeEl.value.trim()){ showResult('err','Erst Hülse scannen, dann als Rückstellmuster buchen.'); return; }
+  if(confirm('Hülse '+codeEl.value.trim()+' als Rückstellmuster/Test buchen?\n(Bekommt keine Seriennummer, Zählung läuft lückenlos weiter.)')){
+    sendScan(false, true);
+  }
+});
+
+// Klebefehler – Rakete auflösen und nachrücken
+document.getElementById('klebefehlerBtn').addEventListener('click', async ()=>{
+  if(!startSerie){ showResult('err','Erst Startnummer setzen (für den Prefix).'); return; }
+  const prefix = startSerie.substring(0, startSerie.lastIndexOf('.'));
+  const num = prompt('Klebefehler – welche Raketennummer fällt raus?\n\n'
+    +'Nur die laufende Nummer eingeben (z.B. 42 für '+prefix+'.0042):');
+  if(num===null) return;
+  const raketennum = parseInt(num.trim(),10);
+  if(isNaN(raketennum)){ showResult('err','Ungültige Nummer.'); return; }
+  showResult('warn','Hole Vorschau…');
+  try{
+    const v = await jsonp({token:TOKEN, action:'klebefehler', prefix:prefix, raketennum:String(raketennum), modus:'vorschau'});
+    if(!v.ok){ showResult('err','✗ '+(v.error||'Fehler')); return; }
+    let txt = 'Folgende Änderungen werden vorgenommen:\n\n';
+    v.aenderungen.forEach(a=>{ txt += a.code+': '+a.von+' → '+a.nach+'\n'; });
+    txt += '\nWirklich ausführen? (Die rausfallende Hülse wird Rückstellmuster.)';
+    if(!confirm(txt)){ showResult('warn','Abgebrochen.'); return; }
+    showResult('warn','Führe Nachrücken aus…');
+    const a = await jsonp({token:TOKEN, action:'klebefehler', prefix:prefix, raketennum:String(raketennum), modus:'ausfuehren'});
+    if(!a.ok){ showResult('err','✗ '+(a.error||'Fehler')); return; }
+    showResult('ok','✓ Klebefehler aufgelöst – '+a.anzahl+' Einträge angepasst, Nummern wieder lückenlos.');
+    refreshBlockInfo();
+  }catch(err){
+    showResult('err','Netzwerkfehler: '+err.message);
+  }
 });
 
 // JSONP-Aufruf: umgeht CORS, indem die Anfrage als <script>-Tag geladen wird.
@@ -166,13 +332,28 @@ function jsonp(params, timeoutMs){
   });
 }
 
-async function sendScan(istAusschuss){
+async function sendScan(istAusschuss, istRSM){
   const code = codeEl.value.trim();
   if(!code){ return; }
+  // Beim Extrudieren MUSS ein Typ gewählt sein
+  if(station==='extrudieren' && !istAusschuss && !istRSM && !aktiverTyp){
+    showResult('err','⚠ Bitte zuerst einen Typ wählen (1, 2 oder 3), bevor du scannst.');
+    codeEl.value=''; focusCode();
+    return;
+  }
+  // Beim Einbau MUSS eine Startnummer gesetzt sein (außer bei Ausschuss/RSM)
+  if(station==='einbau' && !istAusschuss && !istRSM && !startSerie){
+    showResult('err','⚠ Bitte zuerst die Startnummer dieser Charge setzen.');
+    codeEl.value=''; focusCode();
+    return;
+  }
   const params = {
     token: TOKEN, action:'scan', code, station,
-    ausschuss: istAusschuss?'1':'0'
+    ausschuss: istAusschuss?'1':'0',
+    rsm: istRSM?'1':'0'
   };
+  if(station==='extrudieren' && aktiverTyp) params.typ = aktiverTyp;
+  if(station==='einbau' && startSerie) params.startserie = startSerie;
   if(station==='wiegen'){
     const g = document.getElementById('gewicht').value.trim();
     if(g) params.gewicht = g;
@@ -195,13 +376,28 @@ function handleResponse(data, code){
   if(data.status==='verworfen'){
     html = '<div>Hülse <b>'+code+'</b></div><div class="big" style="color:var(--warn)">⚠ Ausschuss verbucht</div>';
     showResult('warn', html + warnLine(data));
+  } else if(data.status==='rueckstellmuster'){
+    html = '<div>Hülse <b>'+code+'</b></div><div class="big" style="color:#c4b5fd">⊘ Rückstellmuster/Test</div>'
+         + '<div class="muted">Keine Seriennummer · Zählung läuft lückenlos weiter</div>';
+    showResult('warn', html + warnLine(data));
   } else if(station==='einbau' && data.serienNr){
     html = '<div>Hülse <b>'+code+'</b> → Seriennummer</div>'
          + '<div class="serie">'+data.serienNr+'</div>';
     showResult('ok', html + warnLine(data));
   } else {
+    let typInfo = '';
+    if(station==='wiegen'){
+      if(data.typ){
+        typInfo = '<div style="margin-top:6px">Typ dieser Hülse: <span class="typbadge">Typ '+data.typ+'</span></div>';
+      } else {
+        typInfo = '<div class="typmissing" style="margin-top:6px">⚠ Kein Typ hinterlegt (Extrudier-Scan fehlt?)</div>';
+      }
+    } else if(data.typ){
+      typInfo = '<div class="muted" style="margin-top:4px">Typ: <span class="typbadge">'+data.typ+'</span></div>';
+    }
     html = '<div>Hülse <b>'+code+'</b></div>'
          + '<div class="big">✓ '+capitalize(data.status)+'</div>'
+         + typInfo
          + (data.gewicht?('<div class="muted">Gewicht: '+data.gewicht+' g</div>'):'');
     showResult('ok', html + warnLine(data));
   }
@@ -233,12 +429,11 @@ function addRecent(code,data){
 }
 
 async function refreshBlockInfo(){
-  if(station!=='einbau'){ blockEl.textContent=''; return; }
+  if(station!=='einbau' || !startSerie){ blockEl.textContent=''; return; }
   try{
-    const d = await jsonp({token:TOKEN, action:'blockInfo'});
+    const d = await jsonp({token:TOKEN, action:'startInfo', startserie:startSerie});
     if(d.ok){
-      blockEl.textContent = 'Block '+d.block+' · nächste: '+(d.naechsteSerie||'—')
-        +' · verbleibend: '+d.verbleibend;
+      blockEl.textContent = 'Nächste Seriennummer: '+d.naechsteFrei;
     } else {
       blockEl.textContent = d.error||'';
     }
@@ -251,7 +446,7 @@ function capitalize(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 document.addEventListener('click',e=>{
   if(e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON') focusCode();
 });
-window.addEventListener('load',()=>{ refreshBlockInfo(); focusCode(); });
+window.addEventListener('load',()=>{ updateTypRow(); updateScanLabel(); refreshBlockInfo(); focusCode(); });
 </script>
 </body>
 </html>
