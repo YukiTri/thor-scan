@@ -53,6 +53,18 @@
   .pill.eingebaut{background:#0f2417;color:#86efac}
   .pill.verworfen{background:#2a1416;color:#fca5a5}
   .pill.rueckstellmuster{background:#2a2440;color:#c4b5fd}
+  .korrektur{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+  .paramgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .paramgrid label{font-size:11px;margin-bottom:3px}
+  .paramgrid input{padding:10px;font-size:16px}
+  .akte-eintrag{background:#0c0e12;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+  .akte-eintrag h3{font-size:14px;margin:0 0 8px;color:#93c5fd}
+  .akte-feld{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}
+  .akte-feld label{flex:0 0 110px;margin:0;text-transform:none;letter-spacing:0;font-size:13px;color:var(--muted)}
+  .akte-feld input{flex:1;padding:8px;font-size:14px}
+  .akte-feld .gesperrt{flex:1;padding:8px;color:var(--muted);font-style:italic}
+  .akte-feld button{flex:0 0 auto;padding:8px 12px;border-radius:8px;border:1px solid var(--accent);background:#1e293b;color:#fff;font-size:13px;cursor:pointer}
+  .akte-meta{font-size:12px;color:var(--muted);margin-bottom:8px}
   .typbtns{display:flex;gap:8px}
   .typbtns button{flex:1;padding:14px 4px;border:2px solid var(--line);background:#0c0e12;
        color:var(--muted);border-radius:10px;font-size:16px;font-weight:700;cursor:pointer}
@@ -69,6 +81,7 @@
     <button data-s="extrudieren" class="active">1 · Extrudieren</button>
     <button data-s="wiegen">2 · Wiegen</button>
     <button data-s="einbau">3 · Einbau</button>
+    <button data-s="huelse">🔍 Hülse</button>
   </div>
 </header>
 
@@ -80,6 +93,22 @@
         <button type="button" data-typ="1">Typ 1</button>
         <button type="button" data-typ="2">Typ 2</button>
         <button type="button" data-typ="3">Typ 3</button>
+      </div>
+    </div>
+
+    <div id="paramrow" style="display:none;margin-bottom:14px">
+      <button type="button" id="paramToggle" class="btn" style="background:#16202e;color:#93c5fd;border:1px solid var(--line);text-align:left">⚙ Extruder-Parameter <span id="paramSummary" class="muted" style="font-weight:400"></span></button>
+      <div id="parambox" style="display:none;margin-top:10px;padding:12px;background:#0c0e12;border:1px solid var(--line);border-radius:10px">
+        <div class="paramgrid">
+          <div><label>Raumtemp (°C)</label><input id="p_raumtemp" type="number" step="0.1" inputmode="decimal"></div>
+          <div><label>Luftfeuchte (%)</label><input id="p_luftfeuchte" type="number" step="1" inputmode="decimal"></div>
+          <div><label>T-soll (°C)</label><input id="p_tsoll" type="number" step="1" inputmode="decimal"></div>
+          <div><label>T1 (°C)</label><input id="p_t1" type="number" step="1" inputmode="decimal"></div>
+          <div><label>T2 (°C)</label><input id="p_t2" type="number" step="1" inputmode="decimal"></div>
+          <div><label>Drehzahl (%)</label><input id="p_drehzahl" type="number" step="1" inputmode="decimal"></div>
+          <div><label>Vorschub (%)</label><input id="p_vorschub" type="number" step="1" inputmode="decimal"></div>
+        </div>
+        <button type="button" id="paramSave" class="btn" style="background:#1e293b;color:#fff;border:1px solid var(--accent);margin-top:10px">Parameter übernehmen</button>
       </div>
     </div>
 
@@ -115,12 +144,24 @@
     <button class="btn" id="klebefehlerBtn" style="display:none;background:#3a2e22;color:#fbbf24;border:1px solid #5a4a2a;margin-top:10px">↩ Klebefehler – Rakete auflösen & nachrücken</button>
   </div>
 
+  <div id="huelsebox" class="scanbox" style="display:none">
+    <label>Hülse scannen für Anzeige / Bearbeitung</label>
+    <input id="huelseCode" type="text" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" placeholder="Barcode scannen oder tippen…">
+    <div id="akteResult" style="margin-top:14px"></div>
+  </div>
+
   <div id="result" class="result"></div>
   <div id="blockinfo" class="blockinfo"></div>
 
   <div class="log">
     <h2>Letzte Scans (dieses Gerät)</h2>
     <div id="loglist"></div>
+  </div>
+
+  <div class="korrektur">
+    <button class="btn" id="undoBtn" style="background:#2a2218;color:#fbbf24;border:1px solid #4a3a22">↶ Letzten Scan rückgängig</button>
+    <button class="btn" id="findBtn" style="background:#1a1e26;color:var(--muted);border:1px solid var(--line);margin-top:8px">🔍 Scan per Code suchen & löschen</button>
   </div>
 </main>
 
@@ -148,6 +189,11 @@ try { aktiverTyp = localStorage.getItem('thor_typ') || ''; } catch(e){}
 // Startnummer der Einbau-Charge (gemerkt wie der Typ)
 let startSerie = '';
 try { startSerie = localStorage.getItem('thor_startserie') || ''; } catch(e){}
+
+// Extruder-Parameter (gemerkt, gelten für alle folgenden Extrudier-Scans)
+const PARAM_KEYS = ['raumtemp','luftfeuchte','tsoll','t1','t2','drehzahl','vorschub'];
+let extruderParams = {};
+try { extruderParams = JSON.parse(localStorage.getItem('thor_params') || '{}'); } catch(e){ extruderParams = {}; }
 
 const typrow = document.getElementById('typrow');
 const typBtns = document.querySelectorAll('.typbtns button');
@@ -182,8 +228,12 @@ function updateTypRow(){
     typrow.style.display='block';
     document.getElementById('typlabel').textContent = 'Typ wählen (gilt für alle folgenden Scans)';
     typBtns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; });
+    document.getElementById('paramrow').style.display='block';
+    ladeParamsInFelder();
+    updateParamSummary();
   } else {
     typrow.style.display='none';
+    document.getElementById('paramrow').style.display='none';
   }
   // Einbau-Elemente nur bei Einbau zeigen
   const istEinbau = (station==='einbau');
@@ -209,12 +259,60 @@ function updateStartStatus(){
   }
 }
 
+// ===== Extruder-Parameter =====
+function ladeParamsInFelder(){
+  PARAM_KEYS.forEach(k=>{
+    const el = document.getElementById('p_'+k);
+    if(el) el.value = (extruderParams[k]!==undefined ? extruderParams[k] : '');
+  });
+}
+
+function updateParamSummary(){
+  const sum = document.getElementById('paramSummary');
+  if(!sum) return;
+  const hatWerte = PARAM_KEYS.some(k=> extruderParams[k]!==undefined && extruderParams[k]!=='');
+  if(hatWerte){
+    sum.textContent = '· Tsoll '+(extruderParams.tsoll||'–')+'° · '+(extruderParams.drehzahl||'–')+'% Drehzahl (gesetzt)';
+  } else {
+    sum.innerHTML = '<span class="typmissing">· noch nicht gesetzt</span>';
+  }
+}
+
+document.getElementById('paramToggle').addEventListener('click',()=>{
+  const box = document.getElementById('parambox');
+  box.style.display = (box.style.display==='none') ? 'block' : 'none';
+});
+
+document.getElementById('paramSave').addEventListener('click',()=>{
+  PARAM_KEYS.forEach(k=>{
+    const el = document.getElementById('p_'+k);
+    extruderParams[k] = el ? el.value.trim() : '';
+  });
+  try { localStorage.setItem('thor_params', JSON.stringify(extruderParams)); } catch(e){}
+  updateParamSummary();
+  document.getElementById('parambox').style.display='none';
+  showResult('ok','✓ Extruder-Parameter übernommen (gelten für alle folgenden Hülsen).');
+  focusCode();
+});
+
 // Station wechseln
 document.querySelectorAll('.stations button').forEach(b=>{
   b.addEventListener('click',()=>{
     document.querySelectorAll('.stations button').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     station = b.dataset.s;
+    const istHuelse = (station==='huelse');
+    // Normale Scan-Box vs. Hülse-Akte-Box umschalten
+    document.querySelector('.scanbox').style.display = istHuelse ? 'none' : 'block';
+    document.getElementById('huelsebox').style.display = istHuelse ? 'block' : 'none';
+    document.querySelector('.log').style.display = istHuelse ? 'none' : 'block';
+    document.querySelector('.korrektur').style.display = istHuelse ? 'none' : 'block';
+    if(istHuelse){
+      document.getElementById('akteResult').innerHTML='';
+      document.getElementById('huelseCode').value='';
+      setTimeout(()=>document.getElementById('huelseCode').focus(),50);
+      return;
+    }
     document.getElementById('scanlabel').textContent = 'Hülse scannen – Station: '+labels[station];
     document.getElementById('wiegen-extra').style.display = (station==='wiegen')?'flex':'none';
     updateTypRow();
@@ -353,6 +451,10 @@ async function sendScan(istAusschuss, istRSM){
     rsm: istRSM?'1':'0'
   };
   if(station==='extrudieren' && aktiverTyp) params.typ = aktiverTyp;
+  if(station==='extrudieren' && !istAusschuss && !istRSM){
+    // Extruder-Parameter mitschicken (jede Hülse trägt ihre eigenen)
+    PARAM_KEYS.forEach(k=>{ if(extruderParams[k]) params[k] = extruderParams[k]; });
+  }
   if(station==='einbau' && startSerie) params.startserie = startSerie;
   if(station==='wiegen'){
     const g = document.getElementById('gewicht').value.trim();
@@ -421,6 +523,10 @@ function showResult(kind,html){
 function addRecent(code,data){
   recent.unshift({code, status:data.status, serie:data.serienNr||'', t:new Date()});
   if(recent.length>15) recent.pop();
+  renderRecent();
+}
+
+function renderRecent(){
   logList.innerHTML = recent.map(x=>
     '<div class="logrow"><span class="code">'+x.code+'</span>'
     +'<span class="st">'+(x.serie?('→ '+x.serie+'  '):'')
@@ -446,6 +552,124 @@ function capitalize(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 document.addEventListener('click',e=>{
   if(e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON') focusCode();
 });
+// Letzten Scan rückgängig machen
+document.getElementById('undoBtn').addEventListener('click', async ()=>{
+  if(!confirm('Den letzten Scan (egal welche Station) wirklich löschen?\nDie Zeile wird endgültig entfernt.')) return;
+  showResult('warn','Lösche letzten Scan…');
+  try{
+    const d = await jsonp({token:TOKEN, action:'loescheScan', modus:'letzter'});
+    if(!d.ok){ showResult('err','✗ '+(d.error||'Fehler')); return; }
+    const g = d.geloescht;
+    showResult('ok','✓ Gelöscht: Hülse '+g.code+' ('+g.station+'/'+g.status+(g.serienNr?' · '+g.serienNr:'')+')');
+    // aus lokaler Liste auch entfernen
+    if(recent.length) { recent.shift(); renderRecent(); }
+    refreshBlockInfo();
+  }catch(err){ showResult('err','Netzwerkfehler: '+err.message); }
+});
+
+// Scan per Code suchen und gezielt löschen
+document.getElementById('findBtn').addEventListener('click', async ()=>{
+  const code = prompt('Hülsen-Code eingeben, dessen Scan(s) du suchen/löschen willst:');
+  if(code===null) return;
+  const c = code.trim();
+  if(!c){ return; }
+  showResult('warn','Suche Scans…');
+  try{
+    const d = await jsonp({token:TOKEN, action:'findeScans', code:c});
+    if(!d.ok){ showResult('err','✗ '+(d.error||'Fehler')); return; }
+    if(d.anzahl===0){ showResult('warn','Keine Einträge für Code '+c+' gefunden.'); return; }
+    // Liste als Auswahl aufbauen
+    let txt = 'Einträge für Hülse '+c+':\n\n';
+    d.treffer.forEach((t,i)=>{ txt += (i+1)+') '+t.station+'/'+t.status+(t.serienNr?' · '+t.serienNr:'')+'  ['+t.zeitText+']\n'; });
+    txt += '\nNummer des zu löschenden Eintrags eingeben (oder Abbrechen):';
+    const wahl = prompt(txt);
+    if(wahl===null) return;
+    const idx = parseInt(wahl.trim(),10)-1;
+    if(isNaN(idx) || idx<0 || idx>=d.treffer.length){ showResult('err','Ungültige Auswahl.'); return; }
+    const ziel = d.treffer[idx];
+    if(!confirm('Wirklich löschen?\n'+ziel.station+'/'+ziel.status+(ziel.serienNr?' · '+ziel.serienNr:'')+' ['+ziel.zeitText+']')) return;
+    showResult('warn','Lösche…');
+    const del = await jsonp({token:TOKEN, action:'loescheScan', code:c, zeit:ziel.zeit});
+    if(!del.ok){ showResult('err','✗ '+(del.error||'Fehler')); return; }
+    showResult('ok','✓ Eintrag gelöscht: Hülse '+c+' ('+ziel.station+'/'+ziel.status+')');
+  }catch(err){ showResult('err','Netzwerkfehler: '+err.message); }
+});
+
+// ===== Hülsen-Akte (Anzeige + Bearbeiten) =====
+const huelseCodeEl = document.getElementById('huelseCode');
+huelseCodeEl.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); ladeAkte(huelseCodeEl.value.trim()); }
+});
+
+const AKTE_FELDER = {
+  extrudieren: [['typ','Typ (1/2/3)'],['raumtemp','Raumtemp °C'],['luftfeuchte','Luftfeuchte %'],
+                ['tsoll','T-soll °C'],['t1','T1 °C'],['t2','T2 °C'],['drehzahl','Drehzahl %'],['vorschub','Vorschub %'],['grund','Notiz']],
+  wiegen: [['gewicht','Gewicht g'],['grund','Notiz']],
+  einbau: [['grund','Notiz']],
+  default: [['grund','Notiz']]
+};
+
+async function ladeAkte(code){
+  if(!code){ return; }
+  const box = document.getElementById('akteResult');
+  box.innerHTML = '<div class="akte-meta">Lade…</div>';
+  try{
+    const d = await jsonp({token:TOKEN, action:'huelseAkte', code:code});
+    if(!d.ok){ box.innerHTML = '<div class="result show err">✗ '+(d.error||'Fehler')+'</div>'; return; }
+    if(d.anzahl===0){ box.innerHTML = '<div class="akte-meta">Keine Einträge für Hülse '+code+' gefunden.</div>'; return; }
+    renderAkte(d);
+  }catch(err){ box.innerHTML = '<div class="result show err">Netzwerkfehler: '+err.message+'</div>'; }
+}
+
+function renderAkte(d){
+  const box = document.getElementById('akteResult');
+  let html = '<div class="akte-meta">Hülse <b>'+d.code+'</b> · '+d.anzahl+' Eintrag/Einträge</div>';
+  d.eintraege.forEach(e=>{
+    // Typ aus Grund extrahieren für die Anzeige
+    const typM = (e.grund||'').match(/Typ:(\d+)/);
+    const typWert = typM ? typM[1] : '';
+    const notiz = (e.grund||'').replace(/Typ:\d+/,'').trim();
+
+    html += '<div class="akte-eintrag">';
+    html += '<h3>'+capitalize(e.station)+' · '+capitalize(e.status)+'</h3>';
+    html += '<div class="akte-meta">'+e.zeitText
+          + (e.serienNr?(' · SerienNr: <b>'+e.serienNr+'</b>'):'')+'</div>';
+
+    // Seriennummer gesperrt anzeigen wenn vorhanden
+    if(e.serienNr){
+      html += '<div class="akte-feld"><label>SerienNr</label><span class="gesperrt">'+e.serienNr+' (nur über Klebefehler änderbar)</span></div>';
+    }
+
+    const felder = AKTE_FELDER[e.station] || AKTE_FELDER.default;
+    felder.forEach(([feld,labelTxt])=>{
+      let wert;
+      if(feld==='typ') wert = typWert;
+      else if(feld==='grund') wert = notiz;
+      else wert = e[feld]||'';
+      const inputId = 'edit_'+e.zeile+'_'+feld;
+      html += '<div class="akte-feld">'
+            + '<label>'+labelTxt+'</label>'
+            + '<input id="'+inputId+'" value="'+String(wert).replace(/"/g,'&quot;')+'">'
+            + '<button onclick="speichereFeld('+e.zeile+',\''+feld+'\',\''+inputId+'\')">✓</button>'
+            + '</div>';
+    });
+    html += '</div>';
+  });
+  box.innerHTML = html;
+}
+
+async function speichereFeld(zeile, feld, inputId){
+  const wert = document.getElementById(inputId).value.trim();
+  try{
+    const d = await jsonp({token:TOKEN, action:'updateFeld', zeile:String(zeile), feld:feld, wert:wert});
+    if(!d.ok){ alert('Fehler: '+(d.error||'unbekannt')); return; }
+    const btn = document.querySelector('#'+inputId).nextElementSibling;
+    if(btn){ const orig=btn.textContent; btn.textContent='✓ ok'; btn.style.background='#1f5132';
+             setTimeout(()=>{ btn.textContent=orig; btn.style.background='#1e293b'; },1200); }
+  }catch(err){ alert('Netzwerkfehler: '+err.message); }
+}
+window.speichereFeld = speichereFeld;
+
 window.addEventListener('load',()=>{ updateTypRow(); updateScanLabel(); refreshBlockInfo(); focusCode(); });
 </script>
 </body>
